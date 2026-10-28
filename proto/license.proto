@@ -1,0 +1,45 @@
+syntax = "proto3";
+package ecochain.license.v1;
+
+// These are the original UTF-8 JSON bytes, never reserialized for verification.
+message SignedLease {
+  bytes payload_json = 1;
+  bytes signature_der = 2; // ECDSA P-256 / SHA-256, ASN.1 DER
+}
+message AcquireRequest {
+  string request_id = 1; // unix_seconds:unique_nonce; 1-hour retry window
+  string session_id = 2;
+  repeated string modules = 3;
+  // Organization and subject are derived from the authenticated caller token.
+}
+message RenewRequest {
+  string request_id = 1; // unix_seconds:unique_nonce; reuse only for exact retry
+  string lease_id = 2;
+  string session_id = 3;
+}
+message LeaseResponse {
+  SignedLease lease = 1;
+  int64 server_time = 2;
+  uint32 heartbeat_after_seconds = 3;
+}
+message ValidateRequest {
+  SignedLease lease = 1;
+  string module = 2;
+}
+message ValidateResponse { int64 expires_at = 1; }
+message StatusRequest {}
+message StatusResponse {
+  string license_id = 1;
+  uint64 revision = 2;
+  int64 expiration_date = 3;
+  uint32 max_users = 4;
+  uint32 active_users = 5;
+  repeated string modules = 6;
+  string binding_mode = 7;
+}
+service LicenseService {
+  rpc Acquire(AcquireRequest) returns (LeaseResponse);
+  rpc Renew(RenewRequest) returns (LeaseResponse);
+  rpc Validate(ValidateRequest) returns (ValidateResponse);
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+}

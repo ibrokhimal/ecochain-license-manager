@@ -1,0 +1,62 @@
+name: ecochain-license-demo
+
+x-runtime: &runtime
+  image: ecochain-license:local
+  user: "${LICENSE_UID:-1000}:${LICENSE_GID:-1000}"
+  read_only: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 128
+  tmpfs: ["/tmp:size=16m,mode=1777"]
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  license-server:
+    <<: *runtime
+    build: .
+    command: [license-server, --config, /config/server.json, --state, /state/state.db, --listen, "0.0.0.0:50051", --allow-development]
+    ports: ["127.0.0.1:${LICENSE_PORT:-50051}:50051"]
+    volumes:
+      - type: bind
+        source: ./demo/server-a
+        target: /config
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./demo/state-a
+        target: /state
+        bind: {create_host_path: false}
+
+  client:
+    <<: *runtime
+    profiles: [tools]
+    command: [licensectl, status, --credentials, /client, --endpoint, "https://license-server:50051"]
+    volumes:
+      - type: bind
+        source: ./demo/client
+        target: /client
+        read_only: true
+        bind: {create_host_path: false}
+
+  clone-server:
+    <<: *runtime
+    profiles: [negative]
+    command: [license-server, --config, /config/server.json, --state, /state/state.db, --listen, "0.0.0.0:50051", --allow-development]
+    volumes:
+      - type: bind
+        source: ./demo/server-b
+        target: /config
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ./demo/state-b
+        target: /state
+        bind: {create_host_path: false}
+
+networks:
+  default:
+    driver: bridge

@@ -1,0 +1,29 @@
+name: ecochain-license-production
+services:
+  license-server:
+    image: ecochain-license:local
+    pull_policy: never
+    user: "${LICENSE_UID:-10001}:${LICENSE_GID:-10001}"
+    group_add: ["${TPM_AGENT_GID:?Set host license-tpm group numeric GID}"]
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    tmpfs: ["/tmp:size=16m,mode=1777"]
+    command: [license-server, --config, /config/server.json, --state, /state/state.db, --listen, "0.0.0.0:50051"]
+    ports: ["${LICENSE_BIND_IP:-127.0.0.1}:${LICENSE_PORT:-50051}:50051"]
+    volumes:
+      - type: bind
+        source: ${LICENSE_CONFIG_DIR:?Set absolute production config directory}
+        target: /config
+        read_only: true
+        bind: {create_host_path: false}
+      - type: bind
+        source: ${LICENSE_STATE_DIR:?Set absolute initialized state directory}
+        target: /state
+        bind: {create_host_path: false}
+      - type: bind
+        source: /run/ecochain-license
+        target: /run/host-license
+        read_only: true
+        bind: {create_host_path: false}

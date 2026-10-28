@@ -1,0 +1,33 @@
+[Unit]
+Description=Ecochain physical TPM license signing agent
+After=local-fs.target
+ConditionPathExists=/dev/tpmrm0
+
+[Service]
+Type=simple
+# Root is used for read-only DMI access. A dedicated user may replace it after
+# site-specific DMI/TPM ACL provisioning. No Linux capabilities are granted.
+User=root
+Group=license-tpm
+RuntimeDirectory=ecochain-license
+RuntimeDirectoryMode=0750
+UMask=0007
+ExecStart=/usr/local/bin/license-agent --config /etc/ecochain-license-tpm/agent.json --socket /run/ecochain-license/agent.sock
+# RuntimeDirectory is removed by systemd after stop. Never unlink foreign sockets.
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX
+DevicePolicy=closed
+DeviceAllow=/dev/tpmrm0 rw
+
+[Install]
+WantedBy=multi-user.target

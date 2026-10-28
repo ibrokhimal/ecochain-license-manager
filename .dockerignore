@@ -1,0 +1,14 @@
+target
+demo
+.git
+docs
+tests
+scripts
+!scripts/
+scripts/*
+!scripts/tpm-simulator-inner.sh
+*.db
+*.db-shm
+*.db-wal
+*.key
+*.lic
