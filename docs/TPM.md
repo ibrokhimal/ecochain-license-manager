@@ -4,7 +4,7 @@
 
 `license-agent` Linux fizik hostda `tpm2-tools` orqali P-256 kalit bilan imzolaydi. Har imzolashda yangi policy session ochiladi va `PolicyNV == activation_counter` talabi tekshiriladi. Private key fayldan yuklanmaydi va software signing’ga fallback yo‘q. `tpm2_sign`ning DER imzosi Rust’da yana tekshiriladi.
 
-Docker demo dasturiy signer bilan ishlaydi. 2026-10-29 kuni Ubuntu 24.04 x86_64 fizik TPM 2.0’da provisioning, systemd agent va activation request imzolash tekshirildi. To‘liq fizik issuance/migratsiya acceptance’i hali yakunlanmagan. Quyidagi provisioning skripti avtomatik demo yoki test tomonidan chaqirilmaydi; fizik apparatda operator tekshiruvi talab etiladi.
+Docker demo dasturiy signer bilan ishlaydi. 2026-10-29 kuni Ubuntu 24.04 x86_64 fizik TPM 2.0’da provisioning, systemd agent, activation request, NV proof, issuance va production Compose’da mTLS/gRPC smoke tekshirildi. Konteyner restartidan keyin holat saqlandi. Fizik hostlar orasidagi migratsiya va host reboot acceptance’i hali yakunlanmagan. Quyidagi provisioning skripti avtomatik demo yoki test tomonidan chaqirilmaydi; fizik apparatda operator tekshiruvi talab etiladi.
 
 Yangilanish: pinned AK/NV attestation verifier va offline migration qo‘shilgan. Amaldagi bosqichma-bosqich buyruqlar [TPM_WORKFLOW.md](TPM_WORKFLOW.md)da; dastlabki boolean-only TPM issuance yo‘li endi rad etiladi.
 

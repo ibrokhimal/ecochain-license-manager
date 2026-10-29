@@ -75,4 +75,12 @@ Yuqoridagi fizik host tekshirilmaganligi haqidagi yozuvlar avvalgi bosqich holat
 - Public manifest vendor registry’ga trusted physical onboarding sifatida kiritildi. Vendor challenge uchun restricted AK orqali NV proof olindi va Mac’dagi Rust verifier bilan tekshirildi.
 - `simulator_allowed=false` bilan 7 kunlik TPM-bound test `.lic` chiqarildi va Linux’ga yuborildi. Vendor private key Linux’ga yuborilmadi; test materiallari public Git’dan tashqarida saqlandi.
 
-SSH tarmoq aloqasi uzilgani uchun fizik `.lic` bilan Docker/mTLS smoke hali bajarilmadi. Fizik hostlar orasidagi migratsiya, NV deaktivatsiya, reboot va to‘liq production acceptance hali ochiq.
+SSH aloqasi tiklangach fizik `.lic` bilan production Compose konfiguratsiyasi (development flag’siz), persistent SQLite init va Docker server ishga tushirildi. Lokal mTLS gRPC status `binding_mode=tpm2`, `max_users=1`, `revision=1` qaytardi. Quyidagi haqiqiy TPM signing ishlatilgan smoke o‘tdi:
+
+```json
+{"checks":["mtls","acquire","idempotency","validate","capacity","owner","module","renew","renew-idempotency"],"smoke":"passed"}
+```
+
+Konteyner restartidan so‘ng `binding_mode=tpm2` va `active_users=1` holati saqlandi; loglarda `license_server_ready` qaytdi. Test porti faqat host loopback’da ochildi. Test sertifikatlari va bearer tokenlar alohida generatsiya qilindi; CA private key server mount’ida yo‘q.
+
+Fizik hostlar orasidagi migratsiya, NV deaktivatsiya, host reboot va to‘liq production acceptance hali ochiq. Bitta fizik TPM testi ikki fizik host orasidagi non-migration kafolatining to‘liq acceptance’i emas.
