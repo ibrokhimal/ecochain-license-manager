@@ -14,6 +14,8 @@ Binary’lar o‘sha Linux arxitekturasi uchun yig‘ilgan bo‘lishi kerak; mac
 
 Fizik hostning `/dev/tpmrm0`, UUID va board serial o‘qilishi tekshiriladi. TPM 2.0 SHA-256/P-256, restricted signing AK va NV counter’ni qo‘llashi kerak.
 
+Provisioning skripti aynan `device:/dev/tpmrm0` kernel resource manager’ini talab qiladi. U vaqtinchalik obyektlarni buyruq tugaganda tozalaydi; obyekt `.ctx` faylini `tpm2_flushcontext`ga uzatish noto‘g‘ri. Policy session fayllari esa explicit flush qilinadi. Barcha transient obyektlarni umumiy flush qilmang.
+
 **Provisioning TPM holatini o‘zgartiradi.** Faqat yangi handle’lar uchun xavfsizlik operatori [TPM.md](TPM.md) va skriptni tekshirgach:
 
 ```bash

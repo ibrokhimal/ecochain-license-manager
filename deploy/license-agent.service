@@ -9,6 +9,7 @@ Type=simple
 # site-specific DMI/TPM ACL provisioning. No Linux capabilities are granted.
 User=root
 Group=license-tpm
+SupplementaryGroups=tss
 RuntimeDirectory=ecochain-license
 RuntimeDirectoryMode=0750
 UMask=0007

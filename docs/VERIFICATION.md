@@ -62,3 +62,17 @@ Production Compose `config --quiet` va shell skriptlar `bash -n` bilan tekshiril
 Read-only reviewer topgan renewal wait bypass’i regression RED → GREEN bilan tuzatildi; issuer ham not_before qisqarishini rad etadi. Follow-up review tuzatishni tasdiqladi. Parallel completion testi bitta commit va bitta stale revision natijasini tekshiradi.
 
 Foydalanuvchi production fizik Linux TPM 2.0 ekanini tasdiqladi. Hali bajarilmagan: aynan shu hostda DMI/TPM ACL, firmware/owner policy, reboot, systemd va private-key non-migration acceptance. Pinned bootstrap va prepared-session/root/relay chegaralari [TPM_WORKFLOW.md](TPM_WORKFLOW.md)da.
+
+## Fizik TPM sinovi — 2026-10-29
+
+Yuqoridagi fizik host tekshirilmaganligi haqidagi yozuvlar avvalgi bosqich holati. Keyingi sinov Ubuntu 24.04 x86_64 va fizik Intel TPM 2.0’da operator ruxsati bilan bajarildi:
+
+- SHA-256, ECDSA va NIST P-256, DMI UUID/serial mavjudligi tekshirildi.
+- Ajratilgan NV counter, policy-only signing key va restricted signing AK yaratildi. Mavjud boshqa TPM obyektlari saqlandi.
+- Kernel resource manager bilan obyekt `.ctx` faylini flush qilish xatosi tuzatildi; sessiyalar explicit tozalanadi, global flush ishlatilmaydi.
+- Capability’siz systemd agentga TPM device uchun `tss` supplementary group kerakligi aniqlandi va tuzatildi. Agent `active`, socket `0660`, konfiguratsiya katalogi `0700`, konfiguratsiya `0600`.
+- Rust agent bilan haqiqiy TPM activation request imzolandi.
+- Public manifest vendor registry’ga trusted physical onboarding sifatida kiritildi. Vendor challenge uchun restricted AK orqali NV proof olindi va Mac’dagi Rust verifier bilan tekshirildi.
+- `simulator_allowed=false` bilan 7 kunlik TPM-bound test `.lic` chiqarildi va Linux’ga yuborildi. Vendor private key Linux’ga yuborilmadi; test materiallari public Git’dan tashqarida saqlandi.
+
+SSH tarmoq aloqasi uzilgani uchun fizik `.lic` bilan Docker/mTLS smoke hali bajarilmadi. Fizik hostlar orasidagi migratsiya, NV deaktivatsiya, reboot va to‘liq production acceptance hali ochiq.

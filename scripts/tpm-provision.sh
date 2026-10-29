@@ -9,9 +9,10 @@ fi
 if [[ "$(uname -s)" != Linux ]]; then echo 'Physical Linux TPM host required' >&2; exit 1; fi
 out="${1:?Usage: tpm-provision.sh NEW_OUTPUT_DIRECTORY}"
 mkdir "$out"
+chmod 700 "$out"
 out="$(cd "$out" && pwd)"
 export TPM2TOOLS_TCTI="${TPM2TOOLS_TCTI:-device:/dev/tpmrm0}"
-case "$TPM2TOOLS_TCTI" in device:*) ;; *) echo 'Physical device TCTI required' >&2; exit 1;; esac
+[[ "$TPM2TOOLS_TCTI" == device:/dev/tpmrm0 ]] || { echo 'Physical kernel resource manager device:/dev/tpmrm0 required' >&2; exit 1; }
 nv_index=0x01500020
 key_handle=0x81010020
 ak_handle=0x81010021
@@ -43,14 +44,13 @@ tpm2_create -C "$out/primary.ctx" -G ecc256 -u "$out/device.pub" -r "$out/device
 tpm2_load -C "$out/primary.ctx" -u "$out/device.pub" -r "$out/device.priv" -c "$out/device.ctx"
 tpm2_evictcontrol -C o "${owner_auth[@]}" -c "$out/device.ctx" "$key_handle"
 tpm2_readpublic -c "$key_handle" -f pem -o "$out/device.pub.pem"
-tpm2_flushcontext "$out/device.ctx"
+# /dev/tpmrm0 releases transient objects when each command closes its connection.
+# flushcontext accepts a raw object handle or a session file, not an object file.
 tpm2_create -C "$out/primary.ctx" -G ecc256:ecdsa-sha256:null -u "$out/ak.pub" -r "$out/ak.priv" \
   -a 'fixedtpm|fixedparent|sensitivedataorigin|userwithauth|restricted|sign'
 tpm2_load -C "$out/primary.ctx" -u "$out/ak.pub" -r "$out/ak.priv" -c "$out/ak.ctx"
 tpm2_evictcontrol -C o "${owner_auth[@]}" -c "$out/ak.ctx" "$ak_handle"
 tpm2_readpublic -c "$ak_handle" -q "$out/ak.qname" -f pem -o "$out/ak.pub.pem"
-tpm2_flushcontext "$out/ak.ctx"
-tpm2_flushcontext "$out/primary.ctx"
 chmod 600 "$out"/*
 cat >"$out/agent.json" <<'JSON'
 {
