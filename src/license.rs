@@ -29,7 +29,26 @@ pub struct Claims {
     pub hardware_hash: String,
     pub server_public_key_pem: String,
     pub binding_mode: String,
+    /// Vendor-attested TPM Clock reading. Absent in licenses issued before clock
+    /// anchoring; omitted on serialization so their digests stay unchanged.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tpm_clock_anchor: Option<ClockAnchor>,
 }
+
+/// Pairs a TPM Clock reading (milliseconds of powered-on time, never reset by the
+/// owner) with a UTC time that is known to be no later than that reading.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClockAnchor {
+    pub unix_time: i64,
+    pub clock_ms: u64,
+}
+
+/// TPM clocks may run fast. Only this share of elapsed TPM time is trusted as
+/// elapsed UTC time, which keeps the derived floor a lower bound.
+pub const TPM_CLOCK_MIN_RATE_PERCENT: u64 = 85;
+/// Tolerated backward movement of TPM Clock (e.g. lost NV update on power loss).
+pub const TPM_CLOCK_BACKWARD_SLACK_MS: u64 = 300_000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -75,6 +94,9 @@ pub fn validate_claims(c: &Claims) -> Result<()> {
             != c.allowed_modules.len()
         || hex::decode(&c.hardware_salt).map_or(true, |b| b.len() != 32)
         || hex::decode(&c.hardware_hash).map_or(true, |b| b.len() != 32)
+        || c.tpm_clock_anchor
+            .as_ref()
+            .is_some_and(|a| a.unix_time < 0 || a.unix_time > c.issued_at)
     {
         return Err(Error::Invalid("invalid license claims".into()));
     }
@@ -134,7 +156,21 @@ pub fn claims_digest(c: &Claims) -> Result<String> {
     Ok(hex::encode(Sha256::digest(serde_json::to_vec(c)?)))
 }
 
+/// Full binding check: cheap claim/time checks plus a fresh device proof.
 pub fn check_binding(
+    claims: &Claims,
+    device: &dyn Device,
+    allow_dev: bool,
+    organization: &str,
+    product: &str,
+    now: i64,
+) -> Result<()> {
+    check_claims(claims, device, allow_dev, organization, product, now)?;
+    prove_device(claims, device)
+}
+
+/// Local checks that need no device round trip.
+pub fn check_claims(
     claims: &Claims,
     device: &dyn Device,
     allow_dev: bool,
@@ -155,6 +191,11 @@ pub fn check_binding(
     if device.mode() != claims.binding_mode {
         return Err(Error::DeviceKeyMismatch);
     }
+    Ok(())
+}
+
+/// Hardware identity, key identity and a fresh challenge signature.
+pub fn prove_device(claims: &Claims, device: &dyn Device) -> Result<()> {
     if device.hardware_hash(&claims.hardware_salt)? != claims.hardware_hash {
         return Err(Error::HardwareMismatch);
     }
@@ -168,4 +209,27 @@ pub fn check_binding(
     let mut proof = PROOF_DOMAIN.to_vec();
     proof.extend_from_slice(&challenge);
     verify_device_signature(&claims.server_public_key_pem, &proof, &device.sign(&proof)?)
+}
+
+/// Lower bound for current UTC time derived from the TPM Clock anchor.
+///
+/// Deleting or restoring the state database cannot move this floor backwards,
+/// because TPM Clock only advances while the TPM is powered.
+pub fn clock_floor(claims: &Claims, device: &dyn Device) -> Result<Option<i64>> {
+    let Some(anchor) = &claims.tpm_clock_anchor else {
+        return Ok(None);
+    };
+    let current = match device.tpm_clock_ms()? {
+        Some(value) => value,
+        None if claims.binding_mode == "tpm2" => {
+            return Err(Error::Device("TPM clock unavailable".into()))
+        }
+        None => return Ok(None),
+    };
+    if current.saturating_add(TPM_CLOCK_BACKWARD_SLACK_MS) < anchor.clock_ms {
+        return Err(Error::Clock);
+    }
+    let elapsed = current.saturating_sub(anchor.clock_ms) / 1000 * TPM_CLOCK_MIN_RATE_PERCENT / 100;
+    let elapsed = i64::try_from(elapsed).map_err(|_| Error::Clock)?;
+    Ok(Some(anchor.unix_time.saturating_add(elapsed)))
 }

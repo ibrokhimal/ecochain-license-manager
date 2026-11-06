@@ -181,3 +181,15 @@ Fizik acceptance alohida: haqiqiy hostda DMI, `/dev/tpmrm0`, AK/lease atributlar
 - Factory trust bootstrap’ni mijoz public key’ni yubordi degan asosda tasdiqlamang. Manufacturer EK trust chain’ni avtomatlashtirish alohida ish.
 - Vendor DB rollback va key compromise alohida operatsion xavf; oddiy SQLite MAC’i apparat rollback himoyasi emas.
 - Eski server butunlay ishdan chiqib NV proof bera olmasa, avtomatik migratsiya yo‘q. Vendor recovery siyosati alohida tasdiqlanadi.
+
+## TPM soat langari (clock rollback himoyasi)
+
+`license-tpm complete` target NV proof’idagi TPM `clockInfo.clock` qiymatini va challenge yaratilgan UTC vaqtini `.lic` ichidagi `tpm_clock_anchor` maydoniga yozadi. Proof challenge nonce’iga javob bo‘lgani uchun u `created_at`dan oldin yaratilmagan, demak bu juftlik UTC vaqt uchun ishonchli pastki chegara.
+
+Server har qurilma tekshiruvida (60 soniyada bir) agent orqali `tpm2_readclock` o‘qiydi va `floor = anchor.unix_time + 0.85 × (TPM clock − anchor.clock_ms)` hisoblaydi. 0.85 koeffitsienti tez yuradigan TPM soatini ham pastki chegara sifatida xavfsiz qiladi. Tizim soati floor’dan 300 soniyadan ko‘proq orqada bo‘lsa `CLOCK_SUSPECT`, floor `expiration_date`dan o‘tsa litsenziya tugagan hisoblanadi. `state.db` o‘chirilib `init-state` qayta bajarilsa ham floor tiklanadi, chunki TPM Clock faqat TPM yoqilgan vaqtda oshadi va owner tomonidan orqaga qaytarilmaydi.
+
+Cheklovlar:
+- Kompyuter o‘chiq turgan vaqt hisoblanmaydi va 15% marja beriladi, shuning uchun floor real vaqtdan orqada qolishi mumkin; u faqat cheksiz rollback’ni yopadi. Oraliq himoyani SQLite `high_time` beradi.
+- `tpm2_readclock` imzosiz o‘qiladi; agent socket’i ishonch chegarasi bo‘lib qoladi (root compromise doiradan tashqarida).
+- Anchor faqat yangi `complete` orqali chiqarilgan litsenziyalarda bo‘ladi. Eski `.lic` fayllar avvalgidek ishlaydi.
+- **Yangilash tartibi:** avval `license-agent`ni yangilang. Anchor’li `tpm2` litsenziya eski agent bilan `DEVICE_UNAVAILABLE` beradi. Eski server binary anchor’li `.lic`ni qabul qilmaydi (`deny_unknown_fields`).

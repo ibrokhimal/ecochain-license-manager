@@ -143,6 +143,7 @@ pub fn create(root: &Path) -> anyhow::Result<()> {
         hardware_hash: devices[0].hardware_hash(&salt)?,
         server_public_key_pem: devices[0].public_key_pem()?,
         binding_mode: "development".into(),
+        tpm_clock_anchor: None,
     };
     let envelope = crate::issuer::issue_registered(
         &root.join("vendor/issuer.db"),

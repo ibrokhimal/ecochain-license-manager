@@ -78,6 +78,14 @@ fn enrollment_then_one_time_migration_waits_without_expanding_rights() {
     .unwrap();
     assert_eq!(claims.revision, 2);
     assert_eq!(claims.not_before, 1581);
+    // Fixture proofs report TPM clock 1000 ms; anchor time is the challenge time.
+    assert_eq!(
+        claims.tpm_clock_anchor,
+        Some(license::ClockAnchor {
+            unix_time: 1100,
+            clock_ms: 1000
+        })
+    );
     assert_eq!(claims.max_users, 10);
     assert_eq!(claims.allowed_modules, ["inventory"]);
     assert_eq!(claims.expiration_date, 20000);

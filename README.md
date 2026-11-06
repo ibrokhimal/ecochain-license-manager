@@ -120,6 +120,9 @@ Har ishga tushishda va himoyalangan RPC’da server apparat hash hamda yangi cha
 | Litsenziya muddati | `not_before <= now < expiration_date` |
 | Logout | Erta seat qaytarish yo‘q; lease tugaydi |
 | Vaqt ortga surilishi | 300s dan ortiq bo‘lsa `CLOCK_SUSPECT` |
+| TPM soat langari | Attestatsiyadan chiqqan `.lic` TPM Clock’ga bog‘lanadi; state o‘chirilsa ham vaqt pastki chegarasi tiklanadi |
+| Qurilma isboti | Har 60 soniyada bir marta; Validate/Status qurilmaga murojaat qilmaydi |
+| Request budget | Yozuv server vaqti bo‘yicha 1 soat saqlanadi (klient timestamp’i qisqartira olmaydi) |
 | State yo‘qolishi | Explicit init bo‘lmaguncha server rad etadi |
 | Bir xil revision, boshqa payload | Rad etiladi |
 | License ID’ni boshqa serverga qayta chiqarish | Vendor registry rad etadi |

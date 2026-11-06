@@ -18,6 +18,7 @@ enum AgentRequest {
     PublicKey,
     Hardware { salt: String },
     Sign { message_b64: String },
+    Clock,
 }
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,6 +54,10 @@ pub fn serve_connection(
             }
             Ok(STANDARD.encode(device.sign(&bytes)?))
         }
+        AgentRequest::Clock => device
+            .tpm_clock_ms()?
+            .map(|ms| ms.to_string())
+            .ok_or_else(|| Error::Device("TPM clock unavailable".into())),
     });
     let response = match result {
         Ok(value) => AgentResponse {
@@ -121,6 +126,24 @@ impl Device for RemoteDevice {
             })?)
             .map_err(|_| Error::Signature)
     }
+    fn tpm_clock_ms(&self) -> Result<Option<u64>> {
+        self.call(AgentRequest::Clock)?
+            .parse()
+            .map(Some)
+            .map_err(|_| Error::Device("invalid TPM clock from agent".into()))
+    }
+}
+
+/// Extracts `clock_info.clock` from `tpm2_readclock` YAML output.
+pub fn parse_readclock(output: &str) -> Result<u64> {
+    let mut values = output
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("clock:"))
+        .map(|value| value.trim().parse::<u64>());
+    match (values.next(), values.next()) {
+        (Some(Ok(value)), None) => Ok(value),
+        _ => Err(Error::Device("unexpected tpm2_readclock output".into())),
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -160,18 +183,37 @@ impl TpmDevice {
         Ok(device)
     }
     fn run(&self, program: &str, args: &[&std::ffi::OsStr]) -> Result<()> {
+        self.run_with_output(program, args, false).map(|_| ())
+    }
+    fn run_with_output(
+        &self,
+        program: &str,
+        args: &[&std::ffi::OsStr],
+        capture: bool,
+    ) -> Result<String> {
         let mut child = Command::new(program)
             .args(args)
             .env("TPM2TOOLS_TCTI", &self.config.tcti)
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
+            .stdout(if capture {
+                Stdio::piped()
+            } else {
+                Stdio::null()
+            })
             .stderr(Stdio::null())
             .spawn()?;
         let start = Instant::now();
         loop {
             if let Some(status) = child.try_wait()? {
                 if status.success() {
-                    return Ok(());
+                    // Output is a few hundred bytes, well under the pipe buffer.
+                    let mut output = String::new();
+                    if let Some(stdout) = child.stdout.take() {
+                        stdout
+                            .take(MAX_MESSAGE as u64)
+                            .read_to_string(&mut output)?;
+                    }
+                    return Ok(output);
                 }
                 return Err(Error::Device(format!(
                     "{program} failed (policy/key/device unavailable)"
@@ -266,5 +308,8 @@ impl Device for TpmDevice {
         })();
         let _ = self.run("tpm2_flushcontext", &[session.as_os_str()]);
         result
+    }
+    fn tpm_clock_ms(&self) -> Result<Option<u64>> {
+        parse_readclock(&self.run_with_output("tpm2_readclock", &[], true)?).map(Some)
     }
 }
