@@ -13,6 +13,10 @@ pub trait Device: Send + Sync {
     fn public_key_pem(&self) -> Result<String>;
     fn hardware_hash(&self, salt: &str) -> Result<String>;
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>>;
+    /// TPM Clock in milliseconds, when the device has a TPM.
+    fn tpm_clock_ms(&self) -> Result<Option<u64>> {
+        Ok(None)
+    }
 }
 
 pub fn fingerprint(uuid: &str, serial: &str, salt: &str) -> Result<String> {

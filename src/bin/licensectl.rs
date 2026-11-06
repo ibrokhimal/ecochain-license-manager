@@ -230,6 +230,7 @@ async fn main() -> Result<()> {
                 hardware_hash: binding.hardware_hash,
                 server_public_key_pem: binding.server_public_key_pem,
                 binding_mode: binding.binding_mode,
+                tpm_clock_anchor: None,
             };
             anyhow::ensure!(expiration_date > now, "expiration must be in the future");
             let envelope = issuer::issue_registered(&registry, &claims, &key_id, &key)?;

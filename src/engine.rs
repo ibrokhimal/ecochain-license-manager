@@ -4,13 +4,15 @@ use crate::{
     lease::{self, LeaseClaims, LeaseToken},
     license::{self, Claims},
 };
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{
+    params, Connection, OpenFlags, OptionalExtension, Transaction, TransactionBehavior,
+};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{
     path::Path,
     sync::{Arc, Mutex},
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 pub const LEASE_TTL: i64 = 180;
@@ -19,6 +21,9 @@ pub const MAX_SESSIONS: i64 = 4;
 const CLOCK_TOLERANCE: i64 = 300;
 const REQUEST_WINDOW: i64 = 3600;
 const MAX_REQUESTS_PER_SUBJECT: i64 = 512;
+/// How long a successful device proof (hardware hash, key identity, challenge
+/// signature, TPM clock floor) is reused before the device is asked again.
+pub const DEVICE_CHECK_INTERVAL: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 pub struct Principal {
@@ -39,9 +44,28 @@ pub struct Status {
 
 pub struct Engine {
     connection: Mutex<Connection>,
+    /// Read-only connection so Validate/Status never wait on the write lock.
+    reader: Mutex<Connection>,
     pub claims: Claims,
     device: Arc<dyn Device>,
     allow_dev: bool,
+    /// Last successful device proof and the TPM clock floor observed then.
+    device_check: Mutex<Option<(Instant, Option<i64>)>>,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Access {
+    Read,
+    Write,
+}
+
+/// Rejects a wall clock that is behind a trusted floor; otherwise raises it.
+fn apply_floor(now: i64, floor: Option<i64>) -> Result<i64> {
+    match floor {
+        Some(floor) if now < floor - CLOCK_TOLERANCE => Err(Error::Clock),
+        Some(floor) => Ok(now.max(floor)),
+        None => Ok(now),
+    }
 }
 
 impl Engine {
@@ -53,6 +77,8 @@ impl Engine {
         initialize: bool,
         now: i64,
     ) -> Result<Self> {
+        let floor = license::clock_floor(&claims, device.as_ref())?;
+        let now = apply_floor(now, floor)?;
         license::check_binding(
             &claims,
             device.as_ref(),
@@ -61,6 +87,7 @@ impl Engine {
             &claims.product_id,
             now,
         )?;
+        let checked_at = Instant::now();
         if !path.exists() && !initialize {
             return Err(Error::StateMissing);
         }
@@ -117,18 +144,45 @@ impl Engine {
             }
         }
         tx.commit()?;
+        let reader = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        reader.busy_timeout(Duration::from_secs(5))?;
         Ok(Self {
             connection: Mutex::new(connection),
+            reader: Mutex::new(reader),
             claims,
             device,
             allow_dev,
+            device_check: Mutex::new(Some((checked_at, floor))),
         })
+    }
+
+    /// Runs the device proof at most once per interval, outside the state lock.
+    /// Returns the TPM clock floor from the latest successful proof.
+    fn device_floor(&self) -> Result<Option<i64>> {
+        let mut cache = self
+            .device_check
+            .lock()
+            .map_err(|_| Error::Device("device check lock poisoned".into()))?;
+        if let Some((at, floor)) = *cache {
+            if at.elapsed() < DEVICE_CHECK_INTERVAL {
+                return Ok(floor);
+            }
+        }
+        *cache = None;
+        license::prove_device(&self.claims, self.device.as_ref())?;
+        let floor = license::clock_floor(&self.claims, self.device.as_ref())?;
+        *cache = Some((Instant::now(), floor));
+        Ok(floor)
     }
 
     fn with_state<T>(
         &self,
         principal: &Principal,
         now: i64,
+        access: Access,
         f: impl FnOnce(&Transaction<'_>, i64) -> Result<T>,
     ) -> Result<T> {
         if principal.organization != self.claims.organization_id
@@ -136,11 +190,18 @@ impl Engine {
         {
             return Err(Error::Unauthorized);
         }
-        let mut conn = self
-            .connection
+        let now = apply_floor(now, self.device_floor()?)?;
+        let lock = match access {
+            Access::Read => &self.reader,
+            Access::Write => &self.connection,
+        };
+        let mut conn = lock
             .lock()
             .map_err(|_| Error::Device("state lock poisoned".into()))?;
-        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let tx = conn.transaction_with_behavior(match access {
+            Access::Read => TransactionBehavior::Deferred,
+            Access::Write => TransactionBehavior::Immediate,
+        })?;
         let (id, revision, digest, high_time) = metadata(&tx)?.ok_or(Error::StateMissing)?;
         if id != self.claims.license_id
             || revision != self.claims.revision as i64
@@ -152,7 +213,7 @@ impl Engine {
             return Err(Error::Clock);
         }
         let effective = now.max(high_time);
-        license::check_binding(
+        license::check_claims(
             &self.claims,
             self.device.as_ref(),
             self.allow_dev,
@@ -160,9 +221,11 @@ impl Engine {
             &self.claims.product_id,
             effective,
         )?;
-        tx.execute("UPDATE metadata SET high_time=?1 WHERE id=1", [effective])?;
-        tx.execute("DELETE FROM requests WHERE expires_at<=?1", [effective])?;
-        tx.execute("DELETE FROM leases WHERE expires_at<=?1", [effective])?;
+        if access == Access::Write {
+            tx.execute("UPDATE metadata SET high_time=?1 WHERE id=1", [effective])?;
+            tx.execute("DELETE FROM requests WHERE expires_at<=?1", [effective])?;
+            tx.execute("DELETE FROM leases WHERE expires_at<=?1", [effective])?;
+        }
         let result = f(&tx, effective)?;
         tx.commit()?;
         Ok(result)
@@ -182,7 +245,7 @@ impl Engine {
         let modules = normalized_modules(modules, &self.claims)?;
         let fingerprint =
             request_fingerprint(&("acquire", &p.organization, &p.subject, session, &modules))?;
-        self.with_state(p, now, |tx, now| {
+        self.with_state(p, now, Access::Write, |tx, now| {
             request_timestamp(request, now)?;
             if let Some(token) = retry(tx, request, p, &fingerprint)? {
                 self.check_persisted(tx, p, &token, now)?; return Ok(token);
@@ -226,7 +289,7 @@ impl Engine {
         }
         let fingerprint =
             request_fingerprint(&("renew", &p.organization, &p.subject, lease_id, session))?;
-        self.with_state(p, now, |tx, now| {
+        self.with_state(p, now, Access::Write, |tx, now| {
             request_timestamp(request, now)?;
             if let Some(token) = retry(tx, request, p, &fingerprint)? {
                 self.check_persisted(tx, p, &token, now)?;
@@ -304,7 +367,7 @@ impl Engine {
         module: &str,
         now: i64,
     ) -> Result<LeaseClaims> {
-        self.with_state(p, now, |tx, now| {
+        self.with_state(p, now, Access::Read, |tx, now| {
             let claims = self.check_persisted(tx, p, token, now)?;
             if !claims.allowed_modules.iter().any(|m| m == module) {
                 return Err(Error::ModuleDenied);
@@ -314,7 +377,7 @@ impl Engine {
     }
 
     pub fn status(&self, p: &Principal, now: i64) -> Result<Status> {
-        self.with_state(p, now, |tx, now| {
+        self.with_state(p, now, Access::Read, |tx, now| {
             Ok(Status {
                 license_id: self.claims.license_id.clone(),
                 revision: self.claims.revision,
@@ -389,7 +452,9 @@ fn remember(
             p.subject,
             fingerprint,
             serde_json::to_string(token)?,
-            request_timestamp(request, now)? + REQUEST_WINDOW
+            // The client chooses the request timestamp. Retention is based on server
+            // time so an old-looking ID cannot make its budget row expire early.
+            request_timestamp(request, now)?.max(now) + REQUEST_WINDOW
         ],
     )?;
     Ok(())

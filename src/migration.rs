@@ -320,17 +320,21 @@ pub fn complete(
     {
         return Err(Error::Revision);
     }
-    if attestation::verify_nv(
+    let target_evidence = attestation::verify_nv(
         &target,
         &proofs.target,
         &nonce(document, "target")?,
         allow_simulator,
-    )?
-    .counter
-        != target.activation_counter
-    {
+    )?;
+    if target_evidence.counter != target.activation_counter {
         return Err(invalid("target TPM counter is not active"));
     }
+    // The proof answers this challenge's nonce, so it was produced no earlier than
+    // created_at: (created_at, TPM clock) is a valid lower bound for UTC time.
+    let clock_anchor = Some(license::ClockAnchor {
+        unix_time: c.created_at,
+        clock_ms: target_evidence.clock,
+    });
     let mut authorized_rebind = None;
     let claims = if c.kind == "enroll" {
         if proofs.old.is_some() {
@@ -355,6 +359,7 @@ pub fn complete(
             hardware_hash: activation.hardware_hash,
             server_public_key_pem: activation.server_public_key_pem,
             binding_mode: activation.binding_mode,
+            tpm_clock_anchor: clock_anchor,
         }
     } else {
         if terms.is_some() {
@@ -403,6 +408,7 @@ pub fn complete(
         old.hardware_hash = activation.hardware_hash;
         old.server_public_key_pem = activation.server_public_key_pem;
         old.binding_mode = activation.binding_mode;
+        old.tpm_clock_anchor = clock_anchor;
         old
     };
     let envelope = issuer::issue_in_transaction(&tx, &claims, key_id, key, authorized_rebind)?;

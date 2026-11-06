@@ -30,6 +30,7 @@ fn fixture() -> (SigningKey, SoftwareDevice, Claims) {
         hardware_hash: device.hardware_hash(&salt).unwrap(),
         server_public_key_pem: device.public_key_pem().unwrap(),
         binding_mode: "development".into(),
+        tpm_clock_anchor: None,
     };
     (vendor, device, claims)
 }
